@@ -41,6 +41,37 @@ cur.execute('''CREATE TABLE IF NOT EXISTS notices (
     message TEXT
 )''')
 
+# --- Seater table for occupancy tracking ---
+cur.execute('''
+CREATE TABLE IF NOT EXISTS seaters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    floor INTEGER,
+    seater_type TEXT,
+    seat_no INTEGER,
+    occupied_by TEXT, -- email of user or NULL
+    UNIQUE(floor, seater_type, seat_no)
+)
+''')
+
+# --- Initialize seaters if not already present ---
+def initialize_seaters():
+    # Floor 1 and 3: 2 single, 2 double, 3 triple
+    # Floor 2: 2 double, 3 triple (no single)
+    for floor in [1, 3]:
+        for seat_no in range(1, 3+1):  # triple: 3
+            if seat_no <= 2:
+                cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Single', seat_no))
+                cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Double', seat_no))
+            cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Triple', seat_no))
+    floor = 2
+    for seat_no in range(1, 3+1):
+        if seat_no <= 2:
+            cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Double', seat_no))
+        cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Triple', seat_no))
+    conn.commit()
+
+initialize_seaters()
+
 conn.commit()
 
 root = tk.Tk()
@@ -212,30 +243,30 @@ def show_registration():
             messagebox.showerror("Error", "Admin ID cannot be registered here.")
             return
 
-        # --- Seater occupancy validation ---
+        # --- Seater occupancy validation using seaters table ---
         if seater == "Single":
             if floor == 2:
                 messagebox.showerror("Error", "Single seater is not available on Floor 2.")
                 return
-            # Only 2 single seaters allowed on floor 1 and floor 3 each
             cur.execute('''
-                SELECT COUNT(*) FROM users WHERE floor=? AND seater=?
+                SELECT id FROM seaters WHERE floor=? AND seater_type=? AND occupied_by IS NULL
             ''', (floor, seater))
-            count = cur.fetchone()[0]
-            if count >= 2:
+            available = cur.fetchone()
+            if not available:
                 messagebox.showerror(
                     "Error",
                     f"Single seater on Floor {floor} is already fully occupied."
                 )
                 return
         else:
-            # For double/triple, max allowed = 2/3 per floor
             cur.execute('''
-                SELECT COUNT(*) FROM users WHERE floor=? AND seater=?
+                SELECT id FROM seaters WHERE floor=? AND seater_type=? AND occupied_by IS NULL
             ''', (floor, seater))
-            count = cur.fetchone()[0]
+            available = cur.fetchone()
             max_allowed = {"Double": 2, "Triple": 3}[seater]
-            if count >= max_allowed:
+            cur.execute('SELECT COUNT(*) FROM seaters WHERE floor=? AND seater_type=?', (floor, seater))
+            total = cur.fetchone()[0]
+            if not available or total == 0:
                 messagebox.showerror(
                     "Error",
                     f"{seater} seater on Floor {floor} is already fully occupied."
@@ -245,6 +276,12 @@ def show_registration():
         try:
             cur.execute('''INSERT INTO users (name, email, phone, parent_name, parent_phone, course, password, seater, floor)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', tuple(values + [seater, floor]))
+            # Mark the seat as occupied
+            cur.execute('''
+                UPDATE seaters SET occupied_by=? WHERE id=(
+                    SELECT id FROM seaters WHERE floor=? AND seater_type=? AND occupied_by IS NULL LIMIT 1
+                )
+            ''', (email, floor, seater))
             conn.commit()
             messagebox.showinfo("Success", f"Registration successful!")
             show_login()
