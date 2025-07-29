@@ -213,18 +213,34 @@ def show_registration():
             return
 
         # --- Seater occupancy validation ---
-        cur.execute('''
-            SELECT COUNT(*) FROM users WHERE floor=? AND seater=?
-        ''', (floor, seater))
-        count = cur.fetchone()[0]
-
-        max_allowed = {"Single": 1, "Double": 2, "Triple": 3}[seater]
-        if count >= max_allowed:
-            messagebox.showerror(
-                "Error",
-                f"{seater} seater on Floor {floor} is already fully occupied."
-            )
-            return
+        if seater == "Single":
+            if floor == 2:
+                messagebox.showerror("Error", "Single seater is not available on Floor 2.")
+                return
+            # Only 2 single seaters allowed on floor 1 and floor 3 each
+            cur.execute('''
+                SELECT COUNT(*) FROM users WHERE floor=? AND seater=?
+            ''', (floor, seater))
+            count = cur.fetchone()[0]
+            if count >= 2:
+                messagebox.showerror(
+                    "Error",
+                    f"Single seater on Floor {floor} is already fully occupied."
+                )
+                return
+        else:
+            # For double/triple, max allowed = 2/3 per floor
+            cur.execute('''
+                SELECT COUNT(*) FROM users WHERE floor=? AND seater=?
+            ''', (floor, seater))
+            count = cur.fetchone()[0]
+            max_allowed = {"Double": 2, "Triple": 3}[seater]
+            if count >= max_allowed:
+                messagebox.showerror(
+                    "Error",
+                    f"{seater} seater on Floor {floor} is already fully occupied."
+                )
+                return
 
         try:
             cur.execute('''INSERT INTO users (name, email, phone, parent_name, parent_phone, course, password, seater, floor)
