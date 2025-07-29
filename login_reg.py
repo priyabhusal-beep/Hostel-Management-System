@@ -55,23 +55,23 @@ CREATE TABLE IF NOT EXISTS seaters (
 
 # --- Initialize seaters if not already present ---
 def initialize_seaters():
-    # Floor 1 and 3: 2 single, 2 double, 3 triple
+    # Floor 1 and 3: 1 single, 2 double, 3 triple
     # Floor 2: 2 double, 3 triple (no single)
     for floor in [1, 3]:
+        # Only 1 single seater per floor
+        cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Single', 1))
+        for seat_no in range(1, 2+1):  # double: 2
+            cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Double', seat_no))
         for seat_no in range(1, 3+1):  # triple: 3
-            if seat_no <= 2:
-                cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Single', seat_no))
-                cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Double', seat_no))
             cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Triple', seat_no))
     floor = 2
+    for seat_no in range(1, 2+1):
+        cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Double', seat_no))
     for seat_no in range(1, 3+1):
-        if seat_no <= 2:
-            cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Double', seat_no))
         cur.execute('INSERT OR IGNORE INTO seaters (floor, seater_type, seat_no, occupied_by) VALUES (?, ?, ?, NULL)', (floor, 'Triple', seat_no))
     conn.commit()
 
 initialize_seaters()
-
 conn.commit()
 
 root = tk.Tk()
@@ -248,14 +248,25 @@ def show_registration():
             if floor == 2:
                 messagebox.showerror("Error", "Single seater is not available on Floor 2.")
                 return
+            # Only 1 single seater per floor
             cur.execute('''
-                SELECT id FROM seaters WHERE floor=? AND seater_type=? AND occupied_by IS NULL
-            ''', (floor, seater))
+                SELECT id FROM seaters WHERE floor=? AND seater_type='Single'
+            ''', (floor,))
+            single_seat = cur.fetchone()
+            if not single_seat:
+                messagebox.showerror(
+                    "Error",
+                    f"No single seater room exists on Floor {floor}."
+                )
+                return
+            cur.execute('''
+                SELECT id FROM seaters WHERE floor=? AND seater_type='Single' AND occupied_by IS NULL
+            ''', (floor,))
             available = cur.fetchone()
             if not available:
                 messagebox.showerror(
                     "Error",
-                    f"Single seater on Floor {floor} is already fully occupied."
+                    f"Single seater room on Floor {floor} is already fully occupied."
                 )
                 return
         else:
@@ -277,11 +288,16 @@ def show_registration():
             cur.execute('''INSERT INTO users (name, email, phone, parent_name, parent_phone, course, password, seater, floor)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', tuple(values + [seater, floor]))
             # Mark the seat as occupied
-            cur.execute('''
-                UPDATE seaters SET occupied_by=? WHERE id=(
-                    SELECT id FROM seaters WHERE floor=? AND seater_type=? AND occupied_by IS NULL LIMIT 1
-                )
-            ''', (email, floor, seater))
+            if seater == "Single":
+                cur.execute('''
+                    UPDATE seaters SET occupied_by=? WHERE floor=? AND seater_type='Single' AND occupied_by IS NULL
+                ''', (email, floor))
+            else:
+                cur.execute('''
+                    UPDATE seaters SET occupied_by=? WHERE id=(
+                        SELECT id FROM seaters WHERE floor=? AND seater_type=? AND occupied_by IS NULL LIMIT 1
+                    )
+                ''', (email, floor, seater))
             conn.commit()
             messagebox.showinfo("Success", f"Registration successful!")
             show_login()
